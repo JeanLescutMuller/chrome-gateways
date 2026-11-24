@@ -319,6 +319,22 @@ def parser() -> argparse.ArgumentParser:
     return ap
 
 
+def session_desktop() -> int | None:
+    """The desktop (macOS space id) of the iTerm2 window that shows this session: its agent tabs go to its Claude
+    account's window there (extension/place.js). None off macOS, without an iTerm2 window (the phone), or on error.
+    Tests: $CHROME_TEST_DESKTOP (a space id, or empty for none)."""
+    if 'CHROME_TEST_DESKTOP' in os.environ:
+        v = os.environ['CHROME_TEST_DESKTOP']
+        return int(v) if v.isdigit() else None
+    if sys.platform != 'darwin':
+        return None
+    try:
+        import desktops as dk
+        return dk.session_desktop()[0]
+    except Exception:   # noqa: BLE001: no desktop is not a reason to refuse the authorization
+        return None
+
+
 def authorized_project(given: str | None, cwd: str) -> str:
     """--project of authorize-tab: inside ~/dev/<category>/<repo> or ~/opt/<repo> it is <repo> (given or not); elsewhere required."""
     repo = kit.repo_of(cwd)
@@ -365,12 +381,12 @@ def main(argv: list | None = None):
     if not sid:
         sys.exit(f'{me}: {NO_SESSION}')
     if a.cmd == 'authorize-tab':
-        project, mode = authorized_project(a.project, cwd), kit.mode_of(aid)
-        kit.update_session(sid, aid, purpose=a.why, project=project, mode=mode, authorized_ts=int(time.time()),
+        project, mode, desk = authorized_project(a.project, cwd), kit.mode_of(aid), session_desktop()
+        kit.update_session(sid, aid, purpose=a.why, project=project, mode=mode, desktop=desk, authorized_ts=int(time.time()),
                            claude_pid=kit.claude_ancestor(),
                            visibility=None, visibility_reason=None, visible_because=None)   # (fields of before 2026-11-23)
-        ctx.update(project=project, mode=mode)
-        d = dict(purpose=a.why, mode=mode)
+        ctx.update(project=project, mode=mode, desktop=desk)
+        d = dict(purpose=a.why, mode=mode, desktop=desk)
         kit.record([{'event': 'claim', **d, 'needs_human': d_sess.get('needs_human')}], ctx, fanout=d)
         print(f'{me}: recorded for {me_key}, project {project}: {a.why!r}. A human must act in the tab: {PROG} '
               'mark-as-needing-human "<what>" after opening it'

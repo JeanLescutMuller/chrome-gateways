@@ -26,6 +26,7 @@ ps.write_text('  501 01:00:00 /Applications/Google Chrome.app/Contents/MacOS/Goo
 ENV = {**os.environ, 'CHROME_STATE': str(tmp / 'state'), 'CLAUDE_CODE_SESSION_ID': 'sess-A', 'CHROME_TEST_PS': str(ps)}
 ENV.pop('JR_JOB', None)
 ENV['CLAUDE_ACCOUNT'] = 'a'   # the session's Claude account decides its profile (DESIGN.md §3)
+ENV['CHROME_TEST_DESKTOP'] = ''   # never the user's iTerm2: no desktop, unless a test sets one
 ENV.pop('CLAUDE_CONFIG_DIR', None)
 for k in ('TMUX', 'TMUX_PANE'):   # never the user's tmux server: the one test that needs tmux starts its own, on -S (below)
     ENV.pop(k, None)
@@ -127,10 +128,10 @@ check('authorize-tab with the options of before 2026-11-23: accepted, ignored', 
 check('tabs_create allowed after the claim', decision(hook('PreToolUse', C + 'tabs_create_mcp')) is None)
 d = hook('PostToolUse', C + 'tabs_create_mcp', {}, [{'type': 'text', 'text': f'Created new tab. Tab ID: {T}'}] + tabs((T, 'New tab', '')))
 e = opened().get(str(T), {})
-check('open.json entry: fields in order', list(e) == ['ts', 'dt', 'opened_ts', 'opened_dt', 'event', 'session_id', 'agent_id', 'project', 'job', 'machine', 'cwd', 'profile', 'device_id', 'tab_id', 'url', 'purpose', 'mode', 'needs_human', 'expires_ts', 'message', 'reply_to'])
+check('open.json entry: fields in order', list(e) == ['ts', 'dt', 'opened_ts', 'opened_dt', 'event', 'session_id', 'agent_id', 'project', 'job', 'machine', 'cwd', 'profile', 'device_id', 'tab_id', 'url', 'purpose', 'mode', 'desktop', 'needs_human', 'expires_ts', 'message', 'reply_to'])
 check('open.json entry: session UUID, project = git toplevel, profile, purpose, no job', e.get('session_id') == 'sess-A' and e.get('project') == 'proj-x'
       and e.get('profile') == 'Claude - Account A' and e.get('purpose') == 'find Amazon RIVR engineers' and e.get('job') is None and e.get('reply_to', '').endswith('asm resume sess-A'))
-check('history line: fields in order, ts first', list(history()[-1]) == ['ts', 'dt', 'event', 'session_id', 'agent_id', 'project', 'job', 'machine', 'cwd', 'profile', 'device_id', 'tab_id', 'url', 'purpose', 'mode', 'needs_human', 'expires_ts', 'message', 'reply_to'])
+check('history line: fields in order, ts first', list(history()[-1]) == ['ts', 'dt', 'event', 'session_id', 'agent_id', 'project', 'job', 'machine', 'cwd', 'profile', 'device_id', 'tab_id', 'url', 'purpose', 'mode', 'desktop', 'needs_human', 'expires_ts', 'message', 'reply_to'])
 check('Claude is told the tab was recorded', 'recorded' in ctx(d))
 d = hook('PreToolUse', C + 'tabs_create_mcp')
 check('second tab refused: reuse tab N', decision(d) == 'deny' and f'tab {T}' in reason(d))
@@ -358,6 +359,25 @@ check('a refusal carries the notice too (never lost)', decision(d) == 'deny' and
 (tmp / f'state/sessions/sess-E.notices.jsonl').write_text(json.dumps({'tab_id': 9, 'url': 'u', 'needs_human': 'x', 'after_s': 7200, 'dt': '2026-11-01T10:00:00Z'}) + '\n')
 d = hook('Stop', session_id='sess-E', stop_hook_active=False)
 check('at Stop: blocked with the notice, so the agent tells the user', d.get('decision') == 'block' and "didn't act in 2 h" in d.get('reason', ''), d)
+# One agent window per account and desktop (DESIGN.md §4): authorize-tab records the session's desktop; its tabs carry it;
+# the host answers the extension's window report with each window's desktop (here from a file: CHROME_TEST_DESKTOPS)
+cli('agent_chrome.py', 'authorize-tab', 'read the docs', '--project', 'proj-k', CLAUDE_CODE_SESSION_ID='sess-K', CHROME_TEST_DESKTOP='964')
+check('authorize-tab records the session\'s desktop', json.loads((tmp / 'state/sessions/sess-K.json').read_text()).get('desktop') == 964)
+hook('PostToolUse', C + 'tabs_create_mcp', {}, tabs((4646, 'New tab', '')), session_id='sess-K')
+check('its tab carries the desktop (the note the extension places it by)', opened().get('4646', {}).get('desktop') == 964, opened().get('4646'))
+fdesk = tmp / 'desks.json'
+fdesk.write_text(json.dumps({'301': [964], '302': [819]}))
+hp = subprocess.Popen([sys.executable, '-IB', str(code('native_host.py'))], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                      env={**ENV, 'CHROME_TEST_DESKTOPS': str(fdesk)})
+hp.stdin.write(frame({'hello': 1}) + frame({'windows': {'profile': 'Claude - Account B', 'windows': [301, 302, 303],
+                                                        'bounds': {'301': [0, 0, 9, 9], '302': [1, 1, 9, 9], '303': [2, 2, 9, 9]}}}))
+hp.stdin.flush()
+l_m, t_end = [], time.time() + 8
+while time.time() < t_end and not any('desktops' in m for m in l_m):
+    l_m.append(json.loads(hp.stdout.read(struct.unpack('<I', hp.stdout.read(4))[0])))
+hp.kill()
+check('host: answers the report with each window\'s desktop (none for an unknown one)',
+      next((m['desktops'] for m in l_m if 'desktops' in m), None) == {'301': [964], '302': [819], '303': []}, l_m[-1:])
 # The extension's window report with frames -> each window's desktop (DESIGN.md §4; macOS: read-only, the real windows)
 if sys.platform == 'darwin':
     sys.path[:0] = [str(ROOT / 'agent-gateway'), str(ROOT / 'shared')]

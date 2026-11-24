@@ -310,7 +310,7 @@ def main():
 
     def ctx_of(a: str, d: dict) -> dict:
         return dict(session_id=sid, agent_id=a or None, cwd=cwd, job=os.environ.get('JR_JOB'), project=d.get('project'),
-                    purpose=d.get('purpose'), mode=kit.mode_of(a),
+                    purpose=d.get('purpose'), mode=kit.mode_of(a), desktop=d.get('desktop'),
                     needs_human=d.get('needs_human'))
     ctx = ctx_of(aid, d_sess)
 

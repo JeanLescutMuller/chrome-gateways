@@ -147,7 +147,7 @@
       <div class="box ag"><b>1 · say why</b><small><code>agent-chrome authorize-tab "&lt;why&gt;"</code></small></div><div class="arr">→</div>
       <div class="box ag"><b>2 · its profile</b><small><code>agent-chrome profile</code> → <code>select_browser</code></small></div><div class="arr">→</div>
       <div class="box ag"><b>3 · one tab</b><small><code>tabs_create_mcp</code>, checked by <code>hook.py</code></small></div><div class="arr">→</div>
-      <div class="box ag"><b>4 · the tab</b><small>Claude in Chrome opens it; "Agent tab notes" adds the bar and moves it to the agent window</small></div><div class="arr">→</div>
+      <div class="box ag"><b>4 · the tab</b><small>Claude in Chrome opens it; "Agent tab notes" adds the bar and moves it to its account's window on its terminal's desktop</small></div><div class="arr">→</div>
       <div class="box ag"><b>5 · the end</b><small>the agent closes it; <code>clean</code> catches what is left</small></div>
     </div>
   </div>
@@ -156,7 +156,7 @@
       <tr><th>Feature</th><th>Why (what goes wrong without it)</th><th>How</th><th>Status</th></tr>
       <tr><td>The profile of the session's Claude account</td><td>the Claude in Chrome extension belongs to one claude.ai account: a session sees only its own account's browsers; your own profile holds your password vault</td><td><code>hook.py</code> refuses any other profile, and yours</td><td><span class="st live">live</span></td></tr>
       <tr><td>Visible, never in front</td><td>a window popping up takes your focus mid-sentence; a headless agent cannot be watched or helped, and a second headless login on LinkedIn risks a ban</td><td>Claude in Chrome actions never bring Chrome forward (measured); a shell-started Chrome is refused</td><td><span class="st live">live</span></td></tr>
-      <tr><td>One window per account and desktop</td><td>tabs scattered over many windows, on the desktop you happen to look at</td><td>the extension moves each agent tab to its account's window on the session's desktop (<code>extension/place.js</code>, <code>desktops.py</code>)</td><td><span class="st partial">today: one window per project</span></td></tr>
+      <tr><td>One window per account and desktop</td><td>tabs scattered over many windows, on the desktop you happen to look at</td><td>the extension moves each agent tab to its account's window on the session's desktop (<code>extension/place.js</code>, <code>desktops.py</code>)</td><td><span class="st live">live</span></td></tr>
       <tr><td>Who / when / why on each tab</td><td>you could not tell an agent's tab from yours, nor which session to ask</td><td>the bar (<code>extension/note.js</code>), the record, <code>agent-chrome status</code></td><td><span class="st live">live</span></td></tr>
       <tr><td>Status: working / waiting for Jean</td><td>an agent stuck on a captcha waits silently</td><td><code>mark-as-needing-human "&lt;what to do&gt;"</code>: red bar, badge "!"; closed after a while if nobody comes</td><td><span class="st live">live</span></td></tr>
       <tr><td>Chat with the agent</td><td>to tell an agent something about its tab without finding its terminal</td><td>the side panel → <code>comments.jsonl</code> → the hook gives it to the session; <code>reply-to-human</code></td><td><span class="st live">live</span></td></tr>
@@ -290,7 +290,7 @@ you, in a terminal: agent-chrome clean    closes tabs of ended sessions, drops w
     <table>
       <tr><th>Item</th><th>Status</th></tr>
       <tr><td>Three gateways, the rename from agent-chrome</td><td><span class="st live">done 2026-11-24</span></td></tr>
-      <tr><td>One window per account and desktop for agent tabs (today: per project)</td><td><span class="st planned">next</span></td></tr>
+      <tr><td>One window per account and desktop for agent tabs (extension 1.10.0)</td><td><span class="st live">done 2026-11-24</span></td></tr>
       <tr><td>The old paths under <code>~/opt/agent-chrome</code></td><td><span class="st live">gone 2026-11-24, on both machines</span></td></tr>
       <tr><td>A login window for the script gateway's option 2 (<code>--login</code>)</td><td><span class="st planned">proposed</span></td></tr>
     </table>

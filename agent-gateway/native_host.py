@@ -7,8 +7,8 @@ Chrome's own NativeMessagingHosts/ folder (not a profile).
 Reads $CHROME_STATE (chrome_kit): open.json (what is open now), history/YYYY-MM.jsonl (the agents' "message" events:
 their replies), comments.jsonl (the user's comments). Writes one line to comments.jsonl per comment typed in the
 side panel: ts, dt, session_id, agent_id (the tab's owner), tab_id, url, text (hook.py gives it to the session). Writes windows/<profile>.json
-while the extension runs: ts, dt, pid, profile, windows (ids), projects ({project: its agent window}), desktops ({window
-id: its desktops}); removed when
+while the extension runs: ts, dt, pid, profile, windows (ids), desktops ({window id: its desktops}, also sent back to the
+extension); removed when
 the extension goes (agent-chrome open-profile-window reads it: does this profile have a window?).
 Sends {"ping": ts} every PING_S seconds without other message (keeps the extension awake). Sends the extension {"notes": {tab_id: entry + "thread"}}, event "done" when the session's last need event since the
 tab opened is "done" (so the bar keeps "✓ done" after a reply or a navigation), at start and after every change of those files: only
@@ -35,7 +35,7 @@ sys.dont_write_bytecode = True  # no __pycache__ next to the deployed copy
 # started carries the test's CHROME_STATE (1 Nov 2026: the bar never showed, the host wrote to a test folder). So the
 # kit's overrides count only from a test's own host wrapper, which sets CHROME_KIT_TEST=1 (tests/test_extension.py).
 if sys.argv[1:2] and sys.argv[1].startswith('chrome-extension://') and not os.environ.get('CHROME_KIT_TEST'):
-    for k in ('CHROME_STATE', 'CHROME_TEST_PS', 'CHROME_LOCAL_STATE', 'CHROME_NEEDS_HUMAN_TTL', 'CHROME_WINDOW_CMD'):
+    for k in ('CHROME_STATE', 'CHROME_TEST_PS', 'CHROME_LOCAL_STATE', 'CHROME_NEEDS_HUMAN_TTL', 'CHROME_WINDOW_CMD', 'CHROME_TEST_DESKTOPS'):
         os.environ.pop(k, None)
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent / 'shared')]   # this gateway's modules, then chrome_kit (shared/)
@@ -162,6 +162,10 @@ def window_desktops(d_bounds: dict) -> dict:
     """{window id: {'desktops': [{space, label, shown}], 'matches': n}}: each Chrome window the extension reported (its
     frame) matched to macOS's windows of Google Chrome by frame, then to the desktops it is on (desktops.py; no
     AppleScript: nothing macOS asks the user about). matches != 1: ambiguous or not found (DESIGN.md §4, the prototype)."""
+    if os.environ.get('CHROME_TEST_DESKTOPS'):   # tests: a JSON file {window id: [desktop ids]} instead of macOS
+        d_t = kit.read_json(Path(os.environ['CHROME_TEST_DESKTOPS']))
+        return {str(w): {'matches': int(str(w) in d_t), 'desktops': [{'space': sp, 'label': f'desktop {sp}', 'shown': True}
+                                                                    for sp in d_t.get(str(w), [])]} for w in d_bounds}
     try:
         import desktops as dk   # macOS only
         lay = dk.layout()
@@ -169,7 +173,7 @@ def window_desktops(d_bounds: dict) -> dict:
         out = {}
         for wid, b in d_bounds.items():
             l_m = [w for w in l_cg if w['rect'] == tuple(int(x) for x in b)]
-            l_sp = sorted({sp for w in l_m for sp in dk.spaces_of(w['id'])})
+            l_sp = sorted(dk.spaces_of(l_m[0]['id'])) if len(l_m) == 1 else []   # two windows with one frame: unknown, never a guess
             out[str(wid)] = {'matches': len(l_m), 'desktops': [{'space': sp, 'label': dk.label(sp, lay),
                                                                  'shown': bool(lay.get(sp, {}).get('shown'))} for sp in l_sp]}
         return out
@@ -184,12 +188,14 @@ def write_windows(d: dict):
     if '/' in profile or profile.startswith('.'):
         return
     ts = int(time.time())
+    d_dk = window_desktops(d['bounds']) if d.get('bounds') else {}
+    if d_dk and 'error' not in d_dk:   # the extension places agent tabs by these (place.js)
+        send({'desktops': {w: [x['space'] for x in v['desktops']] for w, v in d_dk.items()}})
     kit.WINDOWS.mkdir(parents=True, exist_ok=True)
     # a profile not known yet (the extension learns it from its first agent tab): a file of this host's own, removed with it
     f = kit.WINDOWS / (f'{profile}.json' if profile else f'_host-{os.getpid()}.json')
     kit.write_json(f, {'ts': ts, 'dt': kit.utc(ts), 'pid': os.getpid(), 'profile': profile,
-                       'windows': d.get('windows') or [], 'projects': d.get('projects') or {},
-                       **({'desktops': window_desktops(d['bounds'])} if d.get('bounds') else {})})
+                       'windows': d.get('windows') or [], **({'desktops': d_dk} if d_dk else {})})
     if d_mine['windows_file'] and d_mine['windows_file'] != str(f):   # the profile became known: its own file now
         Path(d_mine['windows_file']).unlink(missing_ok=True)
     d_mine['windows_file'] = str(f)

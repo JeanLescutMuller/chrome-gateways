@@ -1,31 +1,25 @@
-"""macOS desktops (Spaces) for the Chrome kit: which desktop a window is on, which desktop each screen shows now,
-the iTerm2 window of a Claude session, and the Chrome window the kit opened for each project.
+"""macOS desktops (Spaces) for the agent gateway: which desktop a window is on (the native host: each Chrome window's
+desktop, by its frame), which desktop each screen shows now, and the desktop of a Claude session's iTerm2 window
+(agent-chrome authorize-tab). Together: one agent window per Claude account and desktop (DESIGN.md §4).
 
 macOS has no public API for desktops: SkyLight's private calls are read here (read-only; they work with SIP on,
 tested on macOS 26.6, 4 Nov 2026), with the public window list (CoreGraphics), through ctypes: standard library only
 (the kit runs on /usr/bin/python3). Facts measured on this Mac (4 Nov 2026):
   - each screen has its own desktops ("Displays have separate Spaces", the macOS default);
   - iTerm2's AppleScript window id is the macOS window number (CGWindowID);
-  - a Chrome window's project is known only for the windows the kit opened (agent-chrome show): one window per
-    project (two projects on one desktop with the same profile get two windows; the user, 4 Nov 2026);
+  - a Chrome window's AppleScript id is the extension's window id, and its frame (chrome.windows) is macOS's
+    (CGWindowList), so a frame finds its macOS window and desktop (24 Nov 2026);
   - no program can move a window to a desktop that is not shown (macOS 26, SIP on): a window gets on a desktop by
     being created while that desktop is shown, on that desktop's screen.
-Reads and writes $CHROME_STATE/windows/desktop-windows.json ({CGWindowID: {project, profile, ts}}).
+Reads only.
 """
 from __future__ import annotations  # "str | None" hints on Python 3.9
 
 import ctypes
 import os
-import re
 import shutil
 import subprocess
-import sys
-import time
-from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent / 'shared')]   # this gateway's modules, then chrome_kit (shared/)
-import chrome_kit as kit  # noqa: E402
 
 _CF = ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
 _CG = ctypes.CDLL('/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics')
@@ -33,7 +27,6 @@ _CS = ctypes.CDLL('/System/Library/Frameworks/ColorSync.framework/ColorSync')   
 _SL = ctypes.CDLL('/System/Library/PrivateFrameworks/SkyLight.framework/SkyLight')
 _P = ctypes.c_void_p
 UTF8 = 0x08000100
-CACHE = kit.WINDOWS / 'desktop-windows.json'
 # iTerm2 runs click commands with PATH=/usr/bin:/bin:/usr/sbin:/sbin: Homebrew's tmux by its full path (4 Nov 2026)
 TMUX = shutil.which('tmux') or next((p for p in ('/opt/homebrew/bin/tmux', '/usr/local/bin/tmux') if os.path.exists(p)), 'tmux')
 
@@ -216,93 +209,6 @@ def session_desktop(clicked: bool = False):
     l_cand = [(sp, d_rect.get(wid)) for wid in iterm_windows(clicked) for sp in spaces_of(wid)]
     l_cand.sort(key=lambda c: not d_lay.get(c[0], {}).get('shown'))
     return (*(l_cand[0] if l_cand else (None, None)), d_lay)
-
-
-# ---------------------------------------------------------------- Chrome's windows, one per project
-def chrome_windows(pid: int) -> list:
-    """Chrome's AppleScript windows: [{'as_id', 'rect': (x, y, w, h)}] (its ids are not CGWindowIDs: matched by rect)."""
-    out = osa('if application "Google Chrome" is running then tell application "Google Chrome"\n set out to ""\n'
-              ' repeat with w in windows\n set b to bounds of w\n'
-              '  set out to out & (id of w as text) & "|" & (item 1 of b) & "|" & (item 2 of b) & "|" & (item 3 of b) & "|" & (item 4 of b) & linefeed\n'
-              ' end repeat\n return out\nend tell')
-    l = []
-    for line in out.splitlines():
-        p = line.split('|')
-        if len(p) == 5 and all(re.fullmatch(r'-?\d+', x) for x in p):
-            x, y, r, b = (int(v) for v in p[1:])
-            l.append({'as_id': int(p[0]), 'rect': (x, y, r - x, b - y)})
-    return l
-
-
-def project_windows(l_cg: list) -> dict:
-    """{CGWindowID: {project, profile, ts}}: the windows the kit opened for a project and that still exist (the
-    record, cleaned of windows that are gone)."""
-    s_ids = {w['id'] for w in l_cg}
-    d = {int(k): v for k, v in kit.read_json(CACHE).items() if k.isdigit() and int(k) in s_ids}
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    kit.write_json(CACHE, {str(k): v for k, v in d.items()})
-    return d
-
-
-def remember(wid: int, project: str, profile: str):
-    d = kit.read_json(CACHE)
-    d[str(wid)] = {'project': project, 'profile': profile, 'ts': int(time.time())}
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    kit.write_json(CACHE, d)
-
-
-def pick(l_cg: list, d_win: dict, profile: str, space: int, d_spaces: dict) -> dict | None:
-    """The front-most window the kit opened in this profile on this desktop (the window list is front to back), else
-    None: one window per profile and desktop (REQUIREMENTS.md R3, R16; per project until 2026-11-23). Never a window
-    the kit did not open."""
-    return next((w for w in l_cg if (d_win.get(w['id']) or {}).get('profile') == profile
-                 and space in d_spaces.get(w['id'], [])), None)
-
-
-def screen_of(rect: tuple) -> tuple:
-    """The bounds (x, y, w, h) of the screen holding the middle of this window (else the first screen)."""
-    cx, cy = rect[0] + rect[2] / 2, rect[1] + rect[3] / 2
-    l_b = [s['bounds'] for s in screens().values()]
-    return next((b for b in l_b if b[0] <= cx < b[0] + b[2] and b[1] <= cy < b[1] + b[3]), l_b[0])
-
-
-# Waits for a Chrome window that is not in {known} AND shows the page {url} (up to 10 s; never another new window,
-# such as one the user opens at the same moment: 4 Nov 2026) and, if its top-left corner is off the screen
-# {sx},{sy}-{sr},{sb}, moves it to {tx},{ty} on that screen (its size kept, cut to fit); prints its id.
-MOVE_NEW_WINDOW = '''tell application "Google Chrome"
- set known to {known}
- repeat 500 times
-  repeat with i in (get id of every window)
-   set wid to contents of i
-   set u to ""
-   if known does not contain wid then
-    try
-     set u to URL of active tab of window id wid
-    end try
-   end if
-   if u starts with "{url}" then
-    set b to bounds of window id wid
-    if (item 1 of b) < {sx} or (item 1 of b) >= {sr} or (item 2 of b) < {sy} or (item 2 of b) >= {sb} then
-     set w to (item 3 of b) - (item 1 of b)
-     set h to (item 4 of b) - (item 2 of b)
-     if w > {sr} - {tx} then set w to {sr} - {tx}
-     if h > {sb} - {ty} then set h to {sb} - {ty}
-     set bounds of window id wid to {{{tx}, {ty}, {tx} + w, {ty} + h}}
-    end if
-    return wid as text
-   end if
-  end repeat
-  delay 0.02
- end repeat
-end tell'''
-
-
-def as_id_of(rect: tuple, l_as: list) -> int | None:
-    return next((w['as_id'] for w in l_as if w['rect'] == rect), None)
-
-
-def cg_of(rect: tuple, l_cg: list, exclude: set = frozenset()) -> dict | None:
-    return next((w for w in l_cg if w['rect'] == rect and w['id'] not in exclude), None)
 
 
 if __name__ == '__main__':   # a look at this Mac: python3 -I desktops.py

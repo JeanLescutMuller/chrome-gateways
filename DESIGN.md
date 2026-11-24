@@ -42,11 +42,11 @@ What we build so that every requirement of [`REQUIREMENTS.md`](REQUIREMENTS.md) 
 
 A session's profile = the one of `$CLAUDE_ACCOUNT` (a → "Claude - Account A", b → "Claude - Account B"). The hook refuses any other `deviceId` and names the right one; the ids live in one table (`D_DEVICE` in `shared/chrome_kit.py`); `agent-chrome profile` prints them. The script gateway uses no Claude profile: its own data folder.
 
-## §4 One window per Claude account and desktop (serves R3) — next
+## §4 One window per Claude account and desktop (serves R3)
 
-**Choice.** The extension keeps one agent window per (profile, desktop) instead of per project. When a session's tab lands in a window that is not that profile's agent window on the session's desktop, the extension moves its tab group there, in the background, as `agent-gateway/extension/place.js` already does per project. The session's desktop is the desktop of its iTerm2 window, found once when the session authorizes (`desktops.py`'s `session_desktop()`) and kept in `sessions/<key>.json`. The native host tells the extension which of its windows is on which desktop (`desktops.py` matches Chrome's windows to macOS's by their position on screen).
+**Built (2026-11-24, extension 1.10.0).** `authorize-tab` records the desktop of the session's iTerm2 window (`desktops.py` `session_desktop()`) in `sessions/<key>.json`, and every tab of that key carries it (`desktop` in the record). The extension reports its windows' frames (at once, on any window change, every 30 s: a window dragged to another desktop moves no frame); the native host matches each frame to macOS's window of Google Chrome and answers each window's desktops. `agent-gateway/extension/place.js` moves an agent tab's group, in the background, into this profile's window on its session's desktop; each copy of the extension runs in one profile, so every window it sees is that account's. It never moves a group holding a user's tab, places each tab once, and closes the window a group left only when that group's arrival created it. Replaced: one window per project (its project map and marker windows).
 
-**Limits, measured.** No program can move a window to another desktop on macOS 26, and a new window always opens on the desktop the user is looking at (1 Nov 2026); tabs move freely between windows. So when a session's desktop has no window of its profile and the user looks elsewhere, the tab stays where Claude in Chrome put it; the bar still names the session.
+**Limits, measured.** No program can move a window to another desktop on macOS 26, and a new window always opens on the desktop the user is looking at (1 Nov 2026); tabs move freely between windows. So when a session's desktop has no window of its profile, the tab stays where Claude in Chrome put it (the bar still names the session); no window is ever created for it. Two Chrome windows with one frame (both maximized on one screen, on two desktops) get no desktop: never a guess, their tabs stay. A session without an iTerm2 window (the phone, a job) has no desktop: its tabs stay.
 
 **Prototype (2026-11-24).** Measured: (1) Chrome's AppleScript window ids are the extension's window ids (`249430992` in both); (2) the 3 browser windows each matched one macOS window by frame and one desktop (`SLSCopySpacesForWindows`); the 20 other macOS windows of Chrome are thin strips with no desktop, and the only shared frames are among them. So the extension sends each window's frame (`chrome.windows`, also on `onBoundsChanged`) and the native host writes each window's desktop into `windows/<profile>.json` (`desktops`: matches, space, label): no AppleScript in the host, so no macOS permission prompt. Still to measure once the extension is reloaded: that `chrome.windows` frames equal macOS's (the host's `matches` = 1), and two windows of one profile on two desktops.
 
@@ -118,7 +118,7 @@ Not built. Path: the native host, on a comment for a session that made no tool c
 |---|---|---|
 | 1–5 | clean-up; profile = account; `authorize-tab "<why>"`; clicks by terminal; `clean` and its job (2026-11-23/24, `c978a7d` … `7ce9c48`) | done |
 | 6 | three gateways, rename to chrome-gateways, `show` removed, `open-link`, the launcher's `needs_human` removed (§1, §7, §10) | done 2026-11-24 |
-| 7 | one window per account and desktop (§4), after a prototype | next |
+| 7 | one window per account and desktop (§4): prototype (window ids and frames measured), then built (`place.js`, extension 1.10.0) | done 2026-11-24 |
 | 8 | the transition links go (after agent-vault's sudo install and the extension's reload) | done 2026-11-24 |
 
 Each step: its tests, then agent-firewall's sandbox part `chrome`, then commit, push, `bash install.sh`.

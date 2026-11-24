@@ -38,7 +38,7 @@ chrome-gateways/                     deployed to ~/opt/chrome-gateways/ (same fo
 - A test never touches the real record, Chrome, iTerm2 or the user's tmux: `CHROME_STATE`, a scratch `HOME`, fakes in `CHROME_WINDOW_CMD`, `OPEN_CMD`, `OPEN_LINK_PANE` (2026-11-23: a test that reached the real Chrome opened windows on the user's screen). The live test (`agent-gateway/tests/live/test_live.sh`) costs about $0.02 of haiku: run it only after a change to the hook's decisions.
 - After a change to the record, run agent-firewall's sandbox part `chrome` (`bash sandbox/run_all.sh chrome` in `/Users/jeanlescut/dev/agents/agent-firewall`): agent-vault depends on it.
 - The hook fails open (never blocks on its own error): keep the `|| true` in its command.
-- A change to `agent-gateway/extension/` raises `version` in its `manifest.json` (`install.sh` refuses it otherwise); tell the user the new version, so they check it in `chrome://extensions` after the reload (the user, 2026-11-24).
+- A change to `agent-gateway/extension/` raises `version` in its `manifest.json` (`install.sh` refuses it otherwise); give the user the new version to check after the reload (2026-11-24).
 - The deny rules on the user's own Chrome profile (Default) are agent-firewall's (its `deny/`), not merged here. The hook still refuses that profile; only `open-link` (the user's click) opens it.
 - Names: `~/opt/chrome-gateways`, env var prefix `AC_` for new variables (`AC_REPO`); the older `CHROME_*` variables, the command `agent-chrome`, skill `chrome` and the native host `com.jeanlescut.agent_tab_notes` (the extension id depends on it) keep their names.
 - Project of a tab = the repo folder name, in `~/dev/<category>/<repo>`, the old `~/dev/<repo>`, or `~/opt/<repo>`.

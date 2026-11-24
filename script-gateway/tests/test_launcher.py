@@ -18,7 +18,7 @@ def code(name: str) -> Path:
     return next(ROOT / d / name for d in ('agent-gateway', 'script-gateway', 'terminal-links', 'shared') if (ROOT / d / name).exists())
 tmp = Path(tempfile.mkdtemp(prefix='chrome-kit-launcher-')).resolve()  # /private/var…: what Chrome's command line shows
 prof = tmp / 'prof'
-ENV = {**os.environ, 'CHROME_STATE': str(tmp / 'state'), 'JR_JOB': 'test.job'}
+ENV = {**os.environ, 'CHROME_STATE': str(tmp / 'state'), 'JR_JOB': 'test.job', 'CHROME_TEST_DESKTOP': ''}
 ENV.pop('CLAUDE_CODE_SESSION_ID', None)
 n_fail = 0
 

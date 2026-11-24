@@ -4,7 +4,7 @@
 // Drawn in a closed shadow root with a constructed stylesheet and no web_accessible_resources: the page's CSP and
 // CSS do not apply to it, and the page cannot probe for it by URL.
 // Fields, in the user's order: opened (date, time), session UUID, subagent (if one opened it), project, job (only when a job opened it),
-// purpose, visibility, then NEEDS HUMAN (with the time the tab closes if nobody acts); then the agent's last message.
+// purpose, then NEEDS HUMAN (with the time the tab closes if nobody acts); then the agent's last message.
 (() => {
   let host = null, root = null, current = null, hidden = false, sizer = null;
 
@@ -47,7 +47,6 @@
       `<span class="f"><span class="dim">project</span> <b>${esc(note.project || "?")}</b></span>`,
       note.job ? `<span class="f"><span class="dim">job</span> <b>${esc(note.job)}</b></span>` : "",
       `<span class="f">${esc(note.purpose || "(no purpose given)")}</span>`,
-      note.visibility ? `<span class="f"><span class="dim">visibility</span> ${esc(note.visibility)}</span>` : "",
       note.needs_human ? `<span class="turn">⚠ NEEDS HUMAN: ${esc(note.needs_human)}${note.expires_ts ? ` <span class="dim">(closes at ${esc(hhmm(note.expires_ts))} if nobody acts)</span>` : ""}</span>`
         : cls === "done" ? `<span class="f"><b>✓ nothing to do: you may close this tab</b></span>`
         : `<span class="f"><b>nothing to do</b></span>`,

@@ -40,7 +40,7 @@ from pathlib import Path
 STATE = Path(os.environ.get('CHROME_STATE') or Path.home() / 'opt/chrome-gateways/state')
 OPEN, HISTORY, COMMENTS, SESSIONS = STATE / 'open.json', STATE / 'history', STATE / 'comments.jsonl', STATE / 'sessions'
 FIELDS = ['ts', 'dt', 'event', 'session_id', 'agent_id', 'project', 'job', 'machine', 'cwd', 'profile', 'device_id',
-          'tab_id', 'url', 'purpose', 'mode', 'needs_human', 'expires_ts', 'message',
+          'tab_id', 'url', 'purpose', 'mode', 'desktop', 'needs_human', 'expires_ts', 'message',
           'reply_to']
 RE_AGENT = re.compile(r'[A-Za-z0-9_-]{1,64}')   # a subagent's id (Claude Code: 17 hex characters)
 # A tab kept for a human is closed after this, if nobody acted: 2 h, the deadline the user set for auto-job-apply

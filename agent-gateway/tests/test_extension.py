@@ -31,6 +31,7 @@ STATE = SCRATCH / 'state'
 shutil.rmtree(STATE, ignore_errors=True)
 os.environ['CHROME_STATE'] = str(STATE)
 os.environ.pop('TMUX_PANE', None)
+os.environ['CHROME_TEST_DESKTOP'] = ''   # authorize-tab: never the user's iTerm2
 PS = SCRATCH / 'ps.txt'                     # the "user's Chrome", started an hour ago: tabs opened since then are shown
 PS.write_text('  501 01:00:00 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n')
 os.environ['CHROME_TEST_PS'] = str(PS)
@@ -108,53 +109,58 @@ def bar_on_top(page) -> bool:
     return page.evaluate("document.elementFromPoint(innerWidth / 2, 8)?.tagName") == 'AGENT-TAB-NOTE'
 
 
+DESKS = SCRATCH / 'desks.json'   # each window's desktop, as macOS would say (the host reads it: CHROME_TEST_DESKTOPS)
+
+
 def windows(ctx, ctl, base):
-    """7. One agent window per project (extension/place.js): a session's tab group of project A that lands in another
-    window moves to A's window; the user's tabs never move; a window owned by B is never taken."""
+    """7. One agent window per Claude account and desktop (extension/place.js): a session's tab group that lands in a
+    window on another desktop moves to this profile's window on its session's desktop; no window there: it stays; the
+    user's tabs never move. Desktops: window 1 and "the user's" on 100, window 2 on 200, nothing on 300."""
     js = ctl.evaluate
     sids = iter(['aaaa0000-0000-4000-8000-00000000000%d' % i for i in range(1, 9)])
-    l_proj = {}
-    for name in ('proj-a', 'proj-b'):
-        (SCRATCH / name / '.git').mkdir(parents=True, exist_ok=True)
-        l_proj[name] = str(SCRATCH / name)
+    (SCRATCH / 'proj-a' / '.git').mkdir(parents=True, exist_ok=True)
 
-    def agent_group(win, project, path):   # what Claude in Chrome does: an inactive tab, in its own group
+    def agent_group(win, path):   # what Claude in Chrome does: an inactive tab, in its own group
         tab = js(f"chrome.tabs.create({{windowId: {win}, url: '{base}/{path}', active: false}}).then(t => t.id)")
         gid = js(f"chrome.tabs.group({{tabIds: [{tab}], createProperties: {{windowId: {win}}}}})")
         return tab, gid
 
-    def rec(tab, project, url):
+    def rec(tab, url, desktop):   # the hook's record of the tab, with its session's desktop (authorize-tab's)
         kit.record([{'event': 'open', 'tab_id': tab, 'url': url, 'profile': 'Claude - Account A', 'device_id': GEN}],
-                   {'session_id': next(sids), 'cwd': l_proj[project]})
+                   {'session_id': next(sids), 'cwd': str(SCRATCH / 'proj-a'), 'desktop': desktop})
 
     tab_of = lambda t: js(f'chrome.tabs.get({t})')
     s_win = lambda: set(js("chrome.windows.getAll({windowTypes: ['normal']}).then(l => l.map(w => w.id))"))
-    mapping = lambda: js("chrome.storage.local.get('map').then(r => r.map || {})")
     active = lambda w: js(f'chrome.tabs.query({{windowId: {w}, active: true}}).then(l => l[0].id)')
-    marker = lambda proj: f'chrome-extension://{EXT_ID}/window.html?project={proj}&profile=Claude+-+general'
 
-    # 7a. `agent-chrome open-profile-window` opened A's window (its first tab: window.html?project=proj-a)
-    w_a = js(f"chrome.windows.create({{focused: false, url: '{marker('proj-a')}'}}).then(w => w.id)")
-    time.sleep(1.5)
-    d_rep = kit.read_json(STATE / 'windows' / 'Claude - Account A.json')
-    l_mk = js(f'chrome.tabs.query({{windowId: {w_a}}})')
-    check('7a. the window opened for A (marker tab, pinned) is A\'s window; reported in windows/<profile>.json',
-          mapping().get('proj-a') == w_a and l_mk[0]['pinned'] and w_a in d_rep.get('windows', [])
-          and d_rep.get('projects', {}).get('proj-a') == w_a, (mapping(), d_rep))
+    def desks(d):   # macOS's answer changes: write it, then a window event makes the extension report again
+        DESKS.write_text(json.dumps({str(k): v for k, v in d.items()}))
+        w = js("chrome.windows.create({focused: false}).then(w => w.id)")
+        js(f'chrome.windows.remove({w})')
+        time.sleep(1.5)
 
-    # 7b. the user's window (focused, a page of theirs); a new session of A lands there
+    # 7a. open-profile-window's first tab names the profile; the host answers each window's desktop
+    w1 = js(f"chrome.windows.create({{focused: false, url: 'chrome-extension://{EXT_ID}/window.html?profile=Claude+-+Account+A'}}).then(w => w.id)")
+    w2 = js("chrome.windows.create({focused: false}).then(w => w.id)")
     w_u = js(f"chrome.windows.create({{focused: true, url: '{base}/user-page'}}).then(w => w.id)")
-    time.sleep(1)
+    d_desk = {w1: [100], w2: [200], w_u: [100]}
+    desks(d_desk)
+    d_rep = next((d for f in sorted((STATE / 'windows').glob('*.json')) if str(w2) in (d := kit.read_json(f)).get('desktops', {})), {})
+    stored = js("chrome.storage.session.get('desk').then(r => r.desk || {})")
+    check('7a. the window report names the profile and carries each window\'s desktop; the extension has them',
+          d_rep.get('desktops', {}).get(str(w2), {}).get('desktops', [{}])[0].get('space') == 200
+          and stored.get(str(w1)) == [100], (d_rep.get('desktops'), stored))
+
+    # 7b. a session on desktop 200 lands in the user's window (desktop 100): its group moves to window 2
     t_user = active(w_u)
-    t1, g1 = agent_group(w_u, 'proj-a', 'a1')
+    t1, g1 = agent_group(w_u, 'a1')
     time.sleep(1)
     pg = next(x for x in ctx.pages if x.url.endswith('/a1'))   # a CDP session attached before the move (as Claude in Chrome's)
-    a_before = active(w_a)
-    rec(t1, 'proj-a', f'{base}/a1')
+    rec(t1, f'{base}/a1', 200)
     time.sleep(2.5)
     t1i = tab_of(t1)
-    check('7b. A\'s group moved from the user\'s window to A\'s window, same group id, not made active',
-          t1i['windowId'] == w_a and t1i['groupId'] == g1 and not t1i['active'] and active(w_a) == a_before, t1i)
+    check('7b. the group moved to the account\'s window on its session\'s desktop, same group id, not made active',
+          t1i['windowId'] == w2 and t1i['groupId'] == g1 and not t1i['active'], t1i)
     check('7b. the user\'s tab and window untouched (still there, still active)',
           tab_of(t_user)['windowId'] == w_u and active(w_u) == t_user and w_u in s_win())
     try:
@@ -166,35 +172,32 @@ def windows(ctx, ctl, base):
         ok, title = False, str(e)
     check('7b. after the move the same CDP session still reads, navigates and screenshots the tab', ok, title)
 
-    # 7c. a session of B lands in A's window: B gets its own new window (A's is never taken)
-    t2, g2 = agent_group(w_a, 'proj-b', 'b1')
-    rec(t2, 'proj-b', f'{base}/b1')
+    # 7c. a session on desktop 300, where the account has no window: the tab stays where it landed
+    s0 = s_win()
+    t2, _ = agent_group(w1, 'a2')
+    rec(t2, f'{base}/a2', 300)
     time.sleep(2.5)
-    t2i, m = tab_of(t2), mapping()
-    w_b = m.get('proj-b')
-    check('7c. B landed in A\'s window: a new window for B, its group moved there; A keeps its window',
-          w_b not in (None, w_a, w_u) and t2i['windowId'] == w_b and t2i['groupId'] == g2 and m.get('proj-a') == w_a, (m, t2i))
-    check('7c. B\'s new window starts with its marker tab', any('project=proj-b' in (x.get('url') or x.get('pendingUrl') or '')
-                                                             for x in js(f'chrome.tabs.query({{windowId: {w_b}}})')))
+    check('7c. no window of the account on its desktop: the tab stays (no window is created)', tab_of(t2)['windowId'] == w1
+          and s_win() == s0, (s0, s_win()))
 
-    # 7d. a window created by the group's arrival (unfocused, only a new tab): moved out, then closed
+    # 7d. a window created by the group's arrival (unfocused, only a new tab): the group moves out, the window closes
     w_new = js("chrome.windows.create({focused: false}).then(w => w.id)")
-    time.sleep(0.5)
-    t3, _ = agent_group(w_new, 'proj-a', 'a2')
-    rec(t3, 'proj-a', f'{base}/a2')
+    desks({**d_desk, w_new: [200]})
+    t3, _ = agent_group(w_new, 'a3')
+    rec(t3, f'{base}/a3', 100)
     time.sleep(2.5)
-    check('7d. a window the arrival created: group moved to A\'s, the empty window closed',
-          tab_of(t3)['windowId'] == w_a and w_new not in s_win(), s_win())
+    check('7d. a window the arrival created: group moved to the desktop\'s window, the empty window closed',
+          tab_of(t3)['windowId'] in (w1, w_u) and w_new not in s_win(), (tab_of(t3)['windowId'], s_win()))
 
     # 7e. a group holding a user's tab (not in open.json): never moved
-    t4, g4 = agent_group(w_u, 'proj-a', 'a3')
+    t4, g4 = agent_group(w_u, 'a4')
     t_mine = js(f"chrome.tabs.create({{windowId: {w_u}, url: '{base}/user-2', active: false}}).then(t => t.id)")
     js(f'chrome.tabs.group({{tabIds: [{t_mine}], groupId: {g4}}})')
-    rec(t4, 'proj-a', f'{base}/a3')
+    rec(t4, f'{base}/a4', 200)
     time.sleep(2.5)
     check('7e. a group with a user\'s tab in it stays where it is', tab_of(t4)['windowId'] == w_u and tab_of(t_mine)['windowId'] == w_u)
     log = js("chrome.storage.session.get('placeLog').then(r => r.placeLog || [])")
-    print('      placeLog:', [(x.get('action'), x.get('project'), x.get('tab')) for x in log][-8:])
+    print('      placeLog:', [(x.get('action'), x.get('desktop'), x.get('tab')) for x in log][-8:])
 
 
 def expiry(ctx, ctl, base):
@@ -228,7 +231,7 @@ def main():
     shutil.rmtree(profile, ignore_errors=True)
     (profile / 'NativeMessagingHosts').mkdir(parents=True)
     host_sh = SCRATCH / 'host.sh'               # what agent-chrome/install.sh's manifest points to, with the test's record
-    host_sh.write_text(f"#!/bin/sh\nCHROME_KIT_TEST=1 CHROME_STATE='{STATE}' CHROME_TEST_PS='{PS}' exec /usr/bin/python3 '{code('native_host.py')}' \"$@\"\n")
+    host_sh.write_text(f"#!/bin/sh\nCHROME_KIT_TEST=1 CHROME_STATE='{STATE}' CHROME_TEST_PS='{PS}' CHROME_TEST_DESKTOPS='{DESKS}' exec /usr/bin/python3 '{code('native_host.py')}' \"$@\"\n")
     host_sh.chmod(0o755)
     (profile / 'NativeMessagingHosts' / f'{HOST}.json').write_text(json.dumps(
         {'name': HOST, 'description': 'test', 'path': str(host_sh), 'type': 'stdio', 'allowed_origins': [f'chrome-extension://{EXT_ID}/']}))
@@ -265,27 +268,22 @@ def main():
             page.screenshot(path=str(SHOTS / 'ext_bar_before.png'))
             kit.record([{'event': 'open', 'tab_id': tid, 'url': f'{base}/apply', 'profile': 'Claude - LinkedIn',
                          'device_id': GEN}], {'session_id': SID, 'cwd': str(PROJ)})
-            claim('authorize-tab', '--mode', 'single', 'Apply to job 4312 (Data Engineer, Zurich)', '--visibility', 'focused',
-                  '--visibility-reason', 'the human solves a captcha', '--project', 'job-applications')
+            claim('authorize-tab', 'Apply to job 4312 (Data Engineer, Zurich)', '--project', 'job-applications')
             active = lambda t: ctl.evaluate(f'chrome.tabs.get({t}).then(t => t.active)')
             other = ctx.new_page()            # the human is elsewhere: another tab in front
             other.goto(f'{base}/job')
             time.sleep(2)
-            check('focused, no need yet: the tab is not brought to the front', not active(tid))
             claim('mark-as-needing-human', 'solve the captcha')
             time.sleep(2)
-            check('focused + mark-as-needing-human: the tab is brought to the front', active(tid))
-            other.bring_to_front()
-            time.sleep(2)
-            check('brought to the front once: the human moved away, it stays behind', not active(tid))
+            check('mark-as-needing-human: the tab is never brought to the front (the bar and badge say it)', not active(tid))
             other.close()
             time.sleep(1)
             txt = bar_text(page)
             opened = kit.read_open()[str(tid)]['opened_ts']
             day = time.strftime('%d', time.localtime(opened))
             check('bar on top, red, badge "!"', bar_on_top(page) and badge(tid) == '!')
-            check('bar fields: opened (date + time), session UUID, project, purpose, visibility, NEEDS HUMAN with its deadline; no job',
-                  all(s in txt for s in ['opened', day, SID, 'job-applications', 'Apply to job 4312', 'visibility focused',
+            check('bar fields: opened (date + time), session UUID, project, purpose, NEEDS HUMAN with its deadline; no job',
+                  all(s in txt for s in ['opened', day, SID, 'job-applications', 'Apply to job 4312',
                                          'NEEDS HUMAN: solve the captcha', 'if nobody acts'])
                   and 'job ' not in txt.replace('job-applications', '').replace('to job', ''), txt)
             covered = page.evaluate(MEASURE)
@@ -318,13 +316,15 @@ def main():
             check('side panel, mode single: "Answer in the terminal: session <id>", no comment box',
                   f'Answer in the terminal: session {SID}' in body and not form_shown(), body[:200])
             sp.screenshot(path=str(SHOTS / 'ext_side_panel_single.png'))
-            claim('authorize-tab', '--mode', 'subagents', 'Apply to job 4312 (Data Engineer, Zurich)', '--visibility', 'focused',
-                  '--visibility-reason', 'the human solves a captcha', '--project', 'job-applications')
+            # the same tab, now a subagent's (subagents mode: the human answers in the panel)
+            claim('--agent-id', 'a1b2c3d4e5f6a7b8c', 'authorize-tab', 'Apply to job 4312 (Data Engineer, Zurich)', '--project', 'job-applications')
+            kit.record([{'event': 'open', 'tab_id': tid, 'url': f'{base}/apply', 'profile': 'Claude - LinkedIn', 'device_id': GEN}],
+                       {'session_id': SID, 'agent_id': 'a1b2c3d4e5f6a7b8c', 'mode': 'subagents', 'cwd': str(PROJ),
+                        'purpose': 'Apply to job 4312 (Data Engineer, Zurich)'})
+            claim('--agent-id', 'a1b2c3d4e5f6a7b8c', 'mark-as-needing-human', 'solve the captcha')
             time.sleep(2)
             body = sp.inner_text('body')
-            check('side panel, mode subagents: the comment box, no terminal note', form_shown() and 'Answer in the terminal' not in body, body[:200])
-            check('side panel details: visibility and why that visibility', 'why that visibility' in body and 'focused' in body
-                  and 'the human solves a captcha' in body, body[:300])
+            check('side panel, a subagent\'s tab: the comment box, no terminal note', form_shown() and 'Answer in the terminal' not in body, body[:200])
             sp.fill('#text', 'Captcha solved, go on')
             sp.click('button')
             time.sleep(1.5)
@@ -333,8 +333,8 @@ def main():
             check('comment -> comments.jsonl: ts, dt, session_id, agent_id, tab_id, url, text',
                   list(last) == ['ts', 'dt', 'session_id', 'agent_id', 'tab_id', 'url', 'text'] and last['session_id'] == SID
                   and last['tab_id'] == tid and last['url'] == f'{base}/apply' and last['text'] == 'Captcha solved, go on', last)
-            claim('mark-as-human-done')
-            claim('reply-to-human', 'Thanks, I see it. Continuing the application.')
+            claim('--agent-id', 'a1b2c3d4e5f6a7b8c', 'mark-as-human-done')
+            claim('--agent-id', 'a1b2c3d4e5f6a7b8c', 'reply-to-human', 'Thanks, I see it. Continuing the application.')
             time.sleep(2)
             body = sp.inner_text('body')
             check('side panel thread: the comment, then the agent\'s reply', body.find('Captcha solved') < body.find('Continuing the application') and 'Captcha solved' in body, body[:120])

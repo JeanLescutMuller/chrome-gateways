@@ -17,7 +17,7 @@ never                                                    → bring Chrome to the
 
 ## The agent gateway: Claude in Chrome
 
-Your tabs are visible, in your Claude account's profile, and never come to the front.
+Your tabs are visible, in your Claude account's profile, and never come to the front; the extension moves your tab into your account's window on your terminal's desktop (recorded at step 1; none there: it stays where it opened).
 
 1. `agent-chrome authorize-tab "<why, in words the user understands>"` (`--project P` when your folder is not inside `~/dev/<category>/<repo>`). The reason is shown on your tab and in `agent-chrome status`. A job without Bash sets `$CHROME_PURPOSE` instead. A subagent authorizes for itself.
 2. `agent-chrome profile` prints your Claude account's profile and its deviceId; `select_browser` with that id. The hook refuses any other profile, `switch_browser`, and Chrome's Default profile (the user's own, with their password vault). A site is logged in only in the profiles where the user logged in to it: a job that needs one runs on that account (`CLAUDE_ACCOUNT=a`).

@@ -1,11 +1,8 @@
-// window.html: the first tab (pinned) of a project's agent window, opened by `agent-chrome open-profile-window` or by place.js.
-// Tells the background which project this window is for; its title names the project in Mission Control.
+// window.html: the first tab (pinned) of a window `agent-chrome open-profile-window` opened for an agent profile with none.
+// Tells the background which profile this extension runs in; its title names the profile in Mission Control.
 const q = new URLSearchParams(location.search);
-const project = q.get("project") || "", profile = q.get("profile") || "";
-document.title = `${project || "?"} · agent window`;
-document.getElementById("title").textContent = `${project || "?"} · agent window`;
-document.getElementById("profile").textContent = profile ? `Chrome profile: ${profile}` : "";
-chrome.runtime.sendMessage({ type: "marker", project, profile }).then(r => {
-  document.getElementById("status").textContent = r && r.mine ? "This is the project's agent window."
-    : r ? `This project's agent window is another one (window ${r.windowId}).` : "";
-}, () => {});
+const profile = q.get("profile") || "";
+document.title = `${profile || "?"} · agent window`;
+document.getElementById("title").textContent = `${profile || "?"} · agent window`;
+document.getElementById("profile").textContent = "Agents of this Claude account put their tabs here, on this desktop.";
+chrome.runtime.sendMessage({ type: "marker", profile }).then(() => {}, () => {});
