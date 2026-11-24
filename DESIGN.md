@@ -106,6 +106,8 @@ Not built. Path: the native host, on a comment for a session that made no tool c
 
 ## §12 Logins through the script gateway (serves R13)
 
+The rule agents follow is skill `site-access` (my-setup, 2026-11-24): the questions before getting into any account (an API, the user's real accounts, a kept session, a grant), for both gateways. Below, the script gateway's part and why.
+
 **Choice**, in this order, the first that works for the site (the tool's AGENTS.md says which): (1) the site's API with a token in `~/.config/<tool>/secrets.env`, no Chrome; (2) a session in the tool's own data folder `~/opt/<tool>/chrome/`, logged in once by the user in a visible window, reused headless; logged out → the script stops and files a task; (3) the code types a password from `~/.config/<tool>/secrets.env`, for a site whose session ends daily. Never an agent typing or reading a password, never a password saved in the data folder's Chrome, never the user's real accounts (they go through the agent gateway: a headless second login risks a ban).
 
 **Reason.** (1) leaves nothing to expire on a page and nothing for a bot check to catch; (2) stores a session, not a password, and keeps the user the only one typing it; (3) puts a password on disk, so it comes last. agent-vault is not an option: it types through Apple Events into a visible Claude in Chrome tab, and no agent is in the loop to protect.
