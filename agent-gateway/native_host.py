@@ -1,0 +1,242 @@
+#!/usr/bin/python3
+"""Native messaging host of the "Agent tab notes" extension (agent-gateway/extension/): the Chrome kit's record, on the tab.
+
+Chrome starts it when the extension connects (chrome.runtime.connectNative("com.jeanlescut.agent_tab_notes")) and
+stops it when the extension goes; the host manifest that allows it is written by agent-chrome/install.sh into
+Chrome's own NativeMessagingHosts/ folder (not a profile).
+Reads $CHROME_STATE (chrome_kit): open.json (what is open now), history/YYYY-MM.jsonl (the agents' "message" events:
+their replies), comments.jsonl (the user's comments). Writes one line to comments.jsonl per comment typed in the
+side panel: ts, dt, session_id, agent_id (the tab's owner), tab_id, url, text (hook.py gives it to the session). Writes windows/<profile>.json
+while the extension runs: ts, dt, pid, profile, windows (ids), projects ({project: its agent window}), desktops ({window
+id: its desktops}); removed when
+the extension goes (agent-chrome open-profile-window reads it: does this profile have a window?).
+Sends {"ping": ts} every PING_S seconds without other message (keeps the extension awake). Sends the extension {"notes": {tab_id: entry + "thread"}}, event "done" when the session's last need event since the
+tab opened is "done" (so the bar keeps "✓ done" after a reply or a navigation), at start and after every change of those files: only
+Claude in Chrome tabs (device_id set) opened since the user's Chrome started (Chrome reuses tab ids after a restart).
+Expiry (the deadline of a tab kept for a human, expires_ts in open.json; chrome_kit.NEEDS_HUMAN_TTL): once past it,
+sends {"expire": [tab_id]}; the extension that holds the tab closes it and answers {"expired": {tab_id, url}}; this
+host then records the event "expired" (the tab leaves open.json), clears the session's need, and appends a notice to
+sessions/<id>.notices.jsonl, which hook.py hands to the session at its next tool call or prompt. The timer is here,
+not in the hook: a session waiting for its human makes no tool call, so its hook would not run before it resumes.
+Python 3.9 (macOS /usr/bin/python3), standard library only.
+"""
+from __future__ import annotations
+
+import json
+import os
+import struct
+import sys
+import threading
+import time
+from pathlib import Path
+
+sys.dont_write_bytecode = True  # no __pycache__ next to the deployed copy
+# Started by Chrome (argv[1] = the extension's origin), the host inherits Chrome's environment: a Chrome that a test
+# started carries the test's CHROME_STATE (1 Nov 2026: the bar never showed, the host wrote to a test folder). So the
+# kit's overrides count only from a test's own host wrapper, which sets CHROME_KIT_TEST=1 (tests/test_extension.py).
+if sys.argv[1:2] and sys.argv[1].startswith('chrome-extension://') and not os.environ.get('CHROME_KIT_TEST'):
+    for k in ('CHROME_STATE', 'CHROME_TEST_PS', 'CHROME_LOCAL_STATE', 'CHROME_NEEDS_HUMAN_TTL', 'CHROME_WINDOW_CMD'):
+        os.environ.pop(k, None)
+HERE = Path(__file__).resolve().parent
+sys.path[:0] = [str(HERE), str(HERE.parent / 'shared')]   # this gateway's modules, then chrome_kit (shared/)
+import chrome_kit as kit  # noqa: E402
+
+lock_out = threading.Lock()
+# Chrome 156 put the extension's service worker to sleep after ~30 s with no message on its port, though an open
+# native port should keep it awake (Chrome docs, "Chrome 105"): the port closed, this host exited, and the kit's
+# record lost its windows and notes until the next tab event (measured 4 Nov 2026). A message every PING_S resets
+# the worker's idle timer; the extension's 30 s alarm wakes it again if it still sleeps.
+PING_S = 20
+d_mine = {'windows_file': None}   # the windows/<profile>.json this host wrote: removed when Chrome closes the port
+
+
+def read_message() -> dict:
+    raw = sys.stdin.buffer.read(4)
+    if len(raw) < 4:                                  # Chrome closed the port (from the reader thread too)
+        if d_mine['windows_file']:
+            Path(d_mine['windows_file']).unlink(missing_ok=True)
+        os._exit(0)
+    return json.loads(sys.stdin.buffer.read(struct.unpack('<I', raw)[0]))
+
+
+def send(obj: dict):
+    data = json.dumps(obj, ensure_ascii=False).encode()
+    with lock_out:
+        sys.stdout.buffer.write(struct.pack('<I', len(data)) + data)
+        sys.stdout.buffer.flush()
+
+
+def jsonl(path: Path):
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    yield json.loads(line)
+                except ValueError:
+                    continue
+    except FileNotFoundError:
+        return
+
+
+def history_files() -> list[Path]:
+    """This month's and last month's history: a tab is rarely open longer."""
+    return sorted(kit.HISTORY.glob('*.jsonl'))[-2:]
+
+
+def notes() -> dict:
+    l_main = [p['start_ts'] for p in kit.chrome_processes() if p['kind'] == "user's Chrome"]
+    since = min(l_main) - 5 if l_main else 0
+    d_notes = {k: dict(e, thread=[]) for k, e in kit.read_open().items()
+               if e.get('device_id') and (e.get('opened_ts') or 0) >= since}
+    by_key = {}   # (session, agent): a subagent's tab shows only its own messages and comments
+    for e in d_notes.values():
+        by_key.setdefault(kit.owner(e), []).append(e)
+    for f in history_files():
+        for r in jsonl(f):
+            ev = r.get('event')
+            if ev in ('message', 'needs_human', 'done'):
+                for e in by_key.get(kit.owner(r), []):
+                    if r.get('ts', 0) < e.get('opened_ts', 0):
+                        continue
+                    if ev == 'message' and r.get('message'):
+                        e['thread'].append({'ts': r['ts'], 'from': 'agent', 'text': r['message']})
+                    elif ev != 'message':   # the human's part: the last need event decides (a reply or a navigation after "done" keeps it)
+                        e['human_done'] = ev == 'done'
+    for c in jsonl(kit.COMMENTS):
+        e = d_notes.get(str(c.get('tab_id')))
+        l_e = [e] if e else by_key.get(kit.owner(c), []) if c.get('session_id') else []
+        for e in l_e:
+            if c.get('ts', 0) >= e.get('opened_ts', 0):
+                e['thread'].append({'ts': c.get('ts'), 'from': 'you', 'text': c.get('text')})
+    for e in d_notes.values():
+        e['thread'].sort(key=lambda m: m['ts'] or 0)
+        if e.pop('human_done', False) and not e.get('needs_human'):
+            e['event'] = 'done'   # what the bar and badge read (extension 1.4.0 tests event == "done"): no reload needed
+    return d_notes
+
+
+def add_comment(d: dict):
+    entry = kit.read_open().get(str(d.get('tab_id')), {})
+    ts = int(time.time())
+    row = {'ts': ts, 'dt': kit.utc(ts), 'session_id': entry.get('session_id'), 'agent_id': entry.get('agent_id'), 'tab_id': d.get('tab_id'),
+           'url': d.get('url') or entry.get('url'), 'text': d.get('text')}
+    with kit.locked(kit.COMMENTS):                    # one line per write: hook.py reads it by byte offset
+        with open(kit.COMMENTS, 'a') as f:
+            f.write(json.dumps(row, ensure_ascii=False) + '\n')
+
+
+def expired(d: dict):
+    """The extension closed a tab past its deadline: record it "expired", tell its session."""
+    e = kit.read_open().get(str(d.get('tab_id')))
+    if not e or not e.get('needs_human'):
+        return                                        # closed or answered meanwhile: nothing expired
+    sid, aid = kit.owner(e)
+    l_r = kit.record([{**{k: e.get(k) for k in kit.FIELDS if k not in ('ts', 'dt')}, 'event': 'expired', 'ts': None,
+                       'url': d.get('url') or e.get('url')}])
+    if not sid:
+        return
+    f_sess = kit.SESSIONS / f'{kit.key_name(sid, aid)}.json'
+    if f_sess.exists():
+        kit.update_session(sid, aid, needs_human=None)
+    f = kit.SESSIONS / f'{kit.key_name(sid, aid)}.notices.jsonl'
+    f.parent.mkdir(parents=True, exist_ok=True)
+    n = {'ts': l_r[0]['ts'], 'dt': l_r[0]['dt'], 'event': 'expired', 'tab_id': e.get('tab_id'), 'url': l_r[0]['url'],
+         'needs_human': e.get('needs_human'), 'expires_ts': e.get('expires_ts'),
+         'after_s': (e.get('expires_ts') or 0) - (need_since(e) or 0) if need_since(e) else None}
+    with kit.locked(f):
+        with open(f, 'a') as fh:
+            fh.write(json.dumps(n, ensure_ascii=False) + '\n')
+
+
+def need_since(e: dict) -> int | None:
+    """When the tab's current need was recorded: its session's last needs_human event with that text."""
+    ts = None
+    for f in history_files():
+        for r in jsonl(f):
+            if r.get('event') == 'needs_human' and kit.owner(r) == kit.owner(e) and r.get('needs_human') == e.get('needs_human'):
+                ts = r.get('ts')
+    return ts
+
+
+def window_desktops(d_bounds: dict) -> dict:
+    """{window id: {'desktops': [{space, label, shown}], 'matches': n}}: each Chrome window the extension reported (its
+    frame) matched to macOS's windows of Google Chrome by frame, then to the desktops it is on (desktops.py; no
+    AppleScript: nothing macOS asks the user about). matches != 1: ambiguous or not found (DESIGN.md §4, the prototype)."""
+    try:
+        import desktops as dk   # macOS only
+        lay = dk.layout()
+        l_cg = [w for w in dk.windows() if w.get('owner') == 'Google Chrome']
+        out = {}
+        for wid, b in d_bounds.items():
+            l_m = [w for w in l_cg if w['rect'] == tuple(int(x) for x in b)]
+            l_sp = sorted({sp for w in l_m for sp in dk.spaces_of(w['id'])})
+            out[str(wid)] = {'matches': len(l_m), 'desktops': [{'space': sp, 'label': dk.label(sp, lay),
+                                                                 'shown': bool(lay.get(sp, {}).get('shown'))} for sp in l_sp]}
+        return out
+    except Exception as e:   # noqa: BLE001: a report is never lost for it
+        return {'error': repr(e)}
+
+
+def write_windows(d: dict):
+    """The extension's report of its profile's windows -> windows/<profile>.json (one profile per extension), with the
+    desktop of each window when the extension sent their frames."""
+    profile = str(d.get('profile') or '')
+    if '/' in profile or profile.startswith('.'):
+        return
+    ts = int(time.time())
+    kit.WINDOWS.mkdir(parents=True, exist_ok=True)
+    # a profile not known yet (the extension learns it from its first agent tab): a file of this host's own, removed with it
+    f = kit.WINDOWS / (f'{profile}.json' if profile else f'_host-{os.getpid()}.json')
+    kit.write_json(f, {'ts': ts, 'dt': kit.utc(ts), 'pid': os.getpid(), 'profile': profile,
+                       'windows': d.get('windows') or [], 'projects': d.get('projects') or {},
+                       **({'desktops': window_desktops(d['bounds'])} if d.get('bounds') else {})})
+    if d_mine['windows_file'] and d_mine['windows_file'] != str(f):   # the profile became known: its own file now
+        Path(d_mine['windows_file']).unlink(missing_ok=True)
+    d_mine['windows_file'] = str(f)
+
+
+def stamp() -> tuple:
+    l = []
+    for p in [kit.OPEN, kit.COMMENTS, *history_files()]:
+        try:
+            st = p.stat()
+            l.append((str(p), st.st_mtime_ns, st.st_size))
+        except FileNotFoundError:
+            l.append((str(p), None))
+    return tuple(l)
+
+
+def main():
+    read_message()                                    # the extension's hello
+
+    def reader():
+        while True:
+            m = read_message()
+            if m.get('comment'):
+                add_comment(m['comment'])
+            if m.get('windows'):
+                write_windows(m['windows'])
+            if m.get('expired'):
+                expired(m['expired'])
+
+    threading.Thread(target=reader, daemon=True).start()
+    last, d_notes, s_sent, t_ping = None, {}, set(), time.monotonic()
+    while True:
+        now = stamp()
+        if now != last:
+            last, d_notes = now, notes()
+            send({'notes': d_notes})
+            t_ping = time.monotonic()
+        if time.monotonic() - t_ping >= PING_S:   # keeps the extension awake (see PING_S)
+            send({'ping': int(time.time())})
+            t_ping = time.monotonic()
+        l_due = [int(k) for k, e in d_notes.items() if e.get('needs_human') and e.get('expires_ts')
+                 and e['expires_ts'] <= time.time() and (k, e['expires_ts']) not in s_sent]
+        if l_due:                                     # once per tab and deadline: the extension that holds it closes it
+            s_sent |= {(str(k), d_notes[str(k)]['expires_ts']) for k in l_due}
+            send({'expire': l_due})
+        time.sleep(0.5)
+
+
+if __name__ == '__main__':
+    main()

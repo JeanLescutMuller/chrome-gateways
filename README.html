@@ -1,0 +1,325 @@
+<!doctype html>
+<!-- README for a human: entities and reasons (what exists, what calls what, why), never a rule or a tunable number (rules: AGENTS.md and agent-gateway/skills/chrome/SKILL.md). The folder's only README. Opens with a double-click; one self-contained file. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>chrome-gateways</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --fg: #1d1d1f; --muted: #626268; --card: #ffffff; --line: #dcdce0; --soft: #f0f0ec;
+    --live: #2e8b57; --partial: #c98a00; --planned: #8a8a90; --no: #c0392b;
+    --ag: #2f6fdb; --sg: #d9480f; --tl: #0d9488; --sh: #6b7280;
+    --ag-bg: #eaf1fd; --sg-bg: #fdeee6; --tl-bg: #e6f6f4; --sh-bg: #f0f1f3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151517; --fg: #ececf0; --muted: #a0a0a8; --card: #1f1f22; --line: #36363c; --soft: #26262a;
+      --live: #5cc28a; --partial: #e0b040; --planned: #8a8a90; --no: #e8695c;
+      --ag: #6ea0ff; --sg: #ff8a4c; --tl: #3cc7b6; --sh: #a3a8b3;
+      --ag-bg: #1b2a45; --sg-bg: #3a2418; --tl-bg: #143633; --sh-bg: #2a2b2f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { margin: 0 0 4px; font-size: 30px; }
+  h2 { margin: 48px 0 6px; font-size: 21px; }
+  h3 { margin: 18px 0 8px; font-size: 16px; }
+  p.sub { margin: 0 0 14px; color: var(--muted); }
+  .lead { color: var(--muted); margin: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; }
+  .card + .card { margin-top: 12px; }
+  pre { margin: 0; font: 12.5px/1.5 ui-monospace, Menlo, monospace; }
+  code { font: 12.5px ui-monospace, Menlo, monospace; background: var(--soft); padding: 1px 4px; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; }
+  td, th { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 13px; }
+  .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; color: var(--muted); font-size: 13px; }
+  .note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  footer { margin-top: 48px; color: var(--muted); font-size: 13px; }
+  a { color: inherit; }
+  .st { display: inline-block; font-size: 12px; font-weight: 600; padding: 0 8px; border-radius: 999px; border: 1.5px solid; white-space: nowrap; }
+  .st.live { color: var(--live); } .st.partial { color: var(--partial); } .st.planned { color: var(--planned); border-style: dashed; } .st.no { color: var(--no); }
+
+  /* the three pillars */
+  .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  @media (max-width: 820px) { .pillars { grid-template-columns: 1fr; } }
+  .pillar { border-radius: 12px; padding: 14px; border: 2px solid; background: var(--card); }
+  .pillar h3 { margin: 0 0 2px; font-size: 17px; }
+  .pillar .folder { font: 12.5px ui-monospace, Menlo, monospace; color: var(--muted); }
+  .pillar .who { margin: 10px 0; padding: 8px 10px; border-radius: 8px; font-size: 14px; }
+  .pillar ul { margin: 6px 0 0; padding-left: 18px; font-size: 14px; }
+  .AG { border-color: var(--ag); } .AG h3 { color: var(--ag); } .AG .who { background: var(--ag-bg); }
+  .SG { border-color: var(--sg); } .SG h3 { color: var(--sg); } .SG .who { background: var(--sg-bg); }
+  .TL { border-color: var(--tl); } .TL h3 { color: var(--tl); } .TL .who { background: var(--tl-bg); }
+  .shared { margin-top: 12px; border: 2px solid var(--sh); border-radius: 12px; padding: 12px 14px; background: var(--sh-bg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .chip { font-size: 12.5px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); }
+
+  /* flows */
+  .flow { display: flex; flex-wrap: wrap; align-items: stretch; gap: 6px; }
+  .flow .box { flex: 1 1 150px; border: 1.5px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--card); font-size: 13.5px; }
+  .flow .box b { display: block; }
+  .flow .box small { color: var(--muted); }
+  .flow .arr { display: flex; align-items: center; color: var(--muted); font-size: 18px; }
+  .flow .box.ag { border-color: var(--ag); } .flow .box.sg { border-color: var(--sg); } .flow .box.tl { border-color: var(--tl); }
+  .flow .box.fw { border-color: var(--no); border-style: dashed; }
+
+  .why { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  @media (max-width: 760px) { .why { grid-template-columns: 1fr; } }
+  .why > div { border-left: 4px solid var(--line); padding: 6px 10px; background: var(--soft); border-radius: 0 8px 8px 0; font-size: 14px; }
+  .why b { display: block; }
+  .why.ag > div { border-color: var(--ag); } .why.sg > div { border-color: var(--sg); } .why.tl > div { border-color: var(--tl); }
+
+  /* desktops */
+  .desks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; max-width: 560px; }
+  .desk { border: 2px solid var(--line); border-radius: 8px; padding: 8px; background: var(--soft); min-height: 110px; }
+  .desk > div:first-child { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .term { font: 11.5px ui-monospace, Menlo, monospace; background: #222; color: #eee; border-radius: 5px; padding: 3px 6px; margin-bottom: 6px; }
+  .win { border-radius: 6px; padding: 5px 7px; font-size: 12.5px; border: 2px solid var(--ag); background: var(--card); }
+  .t { display: inline-block; font-size: 11.5px; padding: 0 5px; border-radius: 4px; margin: 2px 2px 0 0; color: #fff; background: var(--ag); }
+</style>
+</head>
+<body>
+<main>
+  <h1>chrome-gateways</h1>
+  <p class="lead">Every way an agent, a program or you reach Chrome on these machines, each with the features it needs: agents browse without disturbing your work, every tab says who opened it, when and why, nothing is left open, and a link you click opens in the right profile. · Updated 2026-11-24 · formerly <code>agent-chrome</code></p>
+
+  <h2>1 · The context: three kinds of things open Chrome</h2>
+  <p class="sub">Each one controls Chrome differently, and none can use another's way in. That is why there are three gateways.</p>
+  <div class="card">
+    <table>
+      <tr><th></th><th>An agent browsing</th><th>A program (code)</th><th>You, clicking a link</th></tr>
+      <tr><td>Example</td><td>"Check my LinkedIn messages": Claude reads the page and clicks itself</td><td>robotics-radar's script fetches event pages every day; a test screenshots a dashboard</td><td>an agent prints <code>file:///…/report.html</code> or a claude.ai Artifact link; you click it in iTerm2</td></tr>
+      <tr><td>How Chrome is controlled</td><td><b>Claude in Chrome</b>: Anthropic's extension in your normal Chrome; Claude Code gives the agent tools (open a tab, click, read) that it carries out in a real window</td><td><b>Playwright</b>: the code talks to a Chrome it started, through its remote-control port</td><td><b>iTerm2</b> runs a command with the link</td></tr>
+      <tr><td>Can it use another way?</td><td>it could write a script, but then it is code, not the agent browsing</td><td><b>no</b>: Claude in Chrome takes orders only from an AI inside a Claude session</td><td>—</td></tr>
+      <tr><td>Needs a screen?</td><td>yes: Claude in Chrome lives in a window</td><td>no: Chrome can run without any window ("headless")</td><td>yes</td></tr>
+    </table>
+  </div>
+
+  <h2>2 · The three gateways</h2>
+  <div class="pillars">
+    <div class="pillar AG">
+      <h3>Agent gateway</h3><div class="folder">agent-gateway/</div>
+      <div class="who">An agent looks at a page <b>itself</b>: reads, clicks, fills, logs in. Mac only.</div>
+      <ul>
+        <li>Claude in Chrome, in the profile of the session's Claude account</li>
+        <li>visible, never brought to the front</li>
+        <li>one window per account and desktop</li>
+        <li>a bar on each tab: who, when, why</li>
+        <li>status: working / waiting for Jean, with what to do</li>
+        <li>a chat with the agent in the side panel</li>
+        <li>logins through agent-vault, never seeing a password</li>
+      </ul>
+    </div>
+    <div class="pillar SG">
+      <h3>Script gateway</h3><div class="folder">script-gateway/</div>
+      <div class="who"><b>Code</b> opens pages: scripts, tests, scheduled jobs. Mac and NAS.</div>
+      <ul>
+        <li>a separate Chrome, its own data folder</li>
+        <li>headless: no window, ever</li>
+        <li>never left running</li>
+        <li>recorded: who, when, why</li>
+        <li>not flagged as a robot</li>
+      </ul>
+    </div>
+    <div class="pillar TL">
+      <h3>Terminal links</h3><div class="folder">terminal-links/</div>
+      <div class="who"><b>You</b> click a link an agent printed. Agents never open windows to show you something.</div>
+      <ul>
+        <li>rules for agents: always a full, clickable link</li>
+        <li><code>open-link</code>: a claude.ai link → the profile of that terminal's Claude account</li>
+        <li>anything else → your own profile, or the app macOS picks</li>
+      </ul>
+    </div>
+  </div>
+  <div class="shared">
+    <b>shared/</b> · the record <code>~/opt/chrome-gateways/state/</code>: every tab of both gateways, who opened it, when, why · <code>chrome_kit.py</code>: the record and the Claude account profiles
+    <div class="chips"><span class="chip"><code>agent-chrome status</code>: what is open, who, why</span><span class="chip"><code>agent-chrome clean</code> + a daily check</span><span class="chip">the bar on each tab</span><span class="chip">agent-vault: which session owns a tab</span></div>
+  </div>
+
+  <h2>3 · Agent gateway: an agent browsing</h2>
+  <p class="sub">Why it exists: Claude in Chrome alone opens tabs anywhere, in any profile, in front of you, with nothing saying whose they are or whether you are needed.</p>
+  <div class="card">
+    <div class="flow">
+      <div class="box ag"><b>1 · say why</b><small><code>agent-chrome authorize-tab "&lt;why&gt;"</code></small></div><div class="arr">→</div>
+      <div class="box ag"><b>2 · its profile</b><small><code>agent-chrome profile</code> → <code>select_browser</code></small></div><div class="arr">→</div>
+      <div class="box ag"><b>3 · one tab</b><small><code>tabs_create_mcp</code>, checked by <code>hook.py</code></small></div><div class="arr">→</div>
+      <div class="box ag"><b>4 · the tab</b><small>Claude in Chrome opens it; "Agent tab notes" adds the bar and moves it to the agent window</small></div><div class="arr">→</div>
+      <div class="box ag"><b>5 · the end</b><small>the agent closes it; <code>clean</code> catches what is left</small></div>
+    </div>
+  </div>
+  <div class="card">
+    <table>
+      <tr><th>Feature</th><th>Why (what goes wrong without it)</th><th>How</th><th>Status</th></tr>
+      <tr><td>The profile of the session's Claude account</td><td>the Claude in Chrome extension belongs to one claude.ai account: a session sees only its own account's browsers; your own profile holds your password vault</td><td><code>hook.py</code> refuses any other profile, and yours</td><td><span class="st live">live</span></td></tr>
+      <tr><td>Visible, never in front</td><td>a window popping up takes your focus mid-sentence; a headless agent cannot be watched or helped, and a second headless login on LinkedIn risks a ban</td><td>Claude in Chrome actions never bring Chrome forward (measured); a shell-started Chrome is refused</td><td><span class="st live">live</span></td></tr>
+      <tr><td>One window per account and desktop</td><td>tabs scattered over many windows, on the desktop you happen to look at</td><td>the extension moves each agent tab to its account's window on the session's desktop (<code>extension/place.js</code>, <code>desktops.py</code>)</td><td><span class="st partial">today: one window per project</span></td></tr>
+      <tr><td>Who / when / why on each tab</td><td>you could not tell an agent's tab from yours, nor which session to ask</td><td>the bar (<code>extension/note.js</code>), the record, <code>agent-chrome status</code></td><td><span class="st live">live</span></td></tr>
+      <tr><td>Status: working / waiting for Jean</td><td>an agent stuck on a captcha waits silently</td><td><code>mark-as-needing-human "&lt;what to do&gt;"</code>: red bar, badge "!"; closed after a while if nobody comes</td><td><span class="st live">live</span></td></tr>
+      <tr><td>Chat with the agent</td><td>to tell an agent something about its tab without finding its terminal</td><td>the side panel → <code>comments.jsonl</code> → the hook gives it to the session; <code>reply-to-human</code></td><td><span class="st live">live</span></td></tr>
+      <tr><td>Logins without seeing a password</td><td>a password in an agent's transcript is stored at Anthropic and on disk</td><td>agent-vault (<code>vault type-password &lt;tab&gt;</code>) types into this tab, with your grant; it reads which session owns the tab from the record</td><td><span class="st live">live</span></td></tr>
+    </table>
+    <p class="note">Code: <code>hook.py</code> (every Claude in Chrome call), <code>agent_chrome.py</code> (the <code>agent-chrome</code> command), <code>native_host.py</code> + <code>extension/</code> ("Agent tab notes": bar, badge, side panel), <code>desktops.py</code>, <code>merge_claude_settings.py</code>, <code>skills/chrome/</code> (what agents read). Screenshots: <a href="agent-gateway/doc/extension-shots/"><code>agent-gateway/doc/extension-shots/</code></a>.</p>
+  </div>
+
+  <h3>One window per account and desktop: how, given macOS</h3>
+  <div class="card">
+    <p style="margin:0 0 10px">macOS lets no program move a <b>window</b> to another desktop, and a new window always opens on the desktop you are looking at. But a <b>tab</b> can move freely between windows. So the extension never moves windows: it moves tabs into the window that is already there.</p>
+    <div class="desks">
+      <div class="desk"><div>desktop 1</div><div class="term">websites · Claude A</div><div class="term">tasks · Claude A</div><div class="win">Account A <span class="t">websites</span><span class="t">tasks</span></div></div>
+      <div class="desk"><div>desktop 2 (you look here)</div><div class="term">jobs · Claude B</div><div class="win">Account B <span class="t">jobs</span></div></div>
+    </div>
+    <p class="note">When a session's desktop has no window of its account and you are looking elsewhere, its tab stays where Claude in Chrome put it; the bar still names the session.</p>
+  </div>
+
+  <h2>4 · Script gateway: code opening pages</h2>
+  <p class="sub">Why it exists: without it, every script starts its own Chrome, which pops a window, stays running after a crash, and leaves no trace.</p>
+  <div class="card">
+    <div class="why sg">
+      <div><b>Never a window on your screen</b>A script that starts a normal Chrome pops a window and takes the focus. The hook refuses an agent's shell command that starts a visible Chrome; the launcher is the allowed way.</div>
+      <div><b>Nothing left running</b>A job killed by a timeout used to leave Chrome running. A small watcher process closes Chrome as soon as the script dies.</div>
+      <div><b>Recorded: who, when, why</b>Each run is written to the same record as agent tabs, so <code>agent-chrome status</code> shows it.</div>
+      <div><b>Not flagged as a robot</b>A plain headless Chrome announces itself as automated (measured); the launcher's settings make it look like a normal Chrome.</div>
+    </div>
+  </div>
+  <div class="card">
+    <table>
+      <tr><th>Question</th><th>Answer</th></tr>
+      <tr><td>Which Chrome?</td><td>a separate Chrome process, started by <code>launch_headless.py</code>; never your normal Chrome, never a Claude account profile (no Claude is involved)</td></tr>
+      <tr><td>Which profile?</td><td>its own data folder (where Chrome keeps cookies and logins), chosen by the script: a temporary one for public pages, or <code>~/opt/&lt;repo&gt;/chrome/</code> for a tool that needs a login, which you log in to once by hand</td></tr>
+      <tr><td>Visibility</td><td>headless, always; it cannot change. To "see" a page, the code takes a screenshot into a file</td></tr>
+      <tr><td>Windows</td><td>none. One Chrome process per data folder: a second run on the same folder reuses the running one</td></tr>
+      <tr><td>Mac and NAS</td><td>the same on both; on the NAS (no screen) it is the only way: Chrome for Testing, installed by <code>install.sh</code></td></tr>
+      <tr><td>Bar, status, chat</td><td>none: there is no window to put them in, and nobody to act</td></tr>
+      <tr><td>agent-vault</td><td><span class="st no">no</span> it types only into a visible Claude in Chrome tab on the Mac (see below for how code logs in)</td></tr>
+    </table>
+  </div>
+
+  <h3>How code logs in: the recommendation</h3>
+  <p class="sub">Take the first option that works for the site; the tool's AGENTS.md says which one it uses. Today no tool needs any of them (no <code>~/opt/*/chrome/</code> on either machine).</p>
+  <div class="card">
+    <table>
+      <tr><th></th><th>Option</th><th>How</th><th>Why this rank</th></tr>
+      <tr><td><b>1</b></td><td><b>No browser login: the site's API</b></td><td>a token in <code>~/.config/&lt;tool&gt;/secrets.env</code> (readable by you only), read by the code; no Chrome at all</td><td>nothing to expire on a page, no bot check, no password anywhere; works on the NAS</td></tr>
+      <tr><td><b>2</b></td><td><b>A session kept in the tool's own data folder</b></td><td>you log in once, by hand, in a visible window on <code>~/opt/&lt;tool&gt;/chrome/</code> (two-factor included); every run then reuses those cookies, headless. When the session ends, the script sees the login form, stops with "logged out" and files a task for you to log in again</td><td>no password stored at all, only a session; you stay the only one who types it</td></tr>
+      <tr><td><b>3</b></td><td><b>The code types the password</b></td><td>from the tool's own <code>~/.config/&lt;tool&gt;/secrets.env</code>, ideally for an account made for that tool, never printed or logged</td><td>only for a site whose session ends every day: the password then sits in a file on disk</td></tr>
+      <tr><td><span class="st no">never</span></td><td colspan="3">an agent reading or typing a password; a password saved in the data folder's Chrome; your real accounts (LinkedIn, Facebook, WhatsApp Web) through the script gateway: a headless second login there risks a ban, so they go through the agent gateway</td></tr>
+    </table>
+    <p class="note">Option 2 needs a way for you to open that data folder in a window once. <span class="st planned">proposed</span> <code>launch_headless.py --login --data-dir ~/opt/&lt;tool&gt;/chrome --url &lt;login page&gt;</code>: a visible window on that folder for you, recorded like any tab, refused inside a Claude session (so only you run it).</p>
+  </div>
+
+  <h2>5 · Terminal links: you clicking</h2>
+  <p class="sub">Why it exists: agents used to open windows to show you a page, on any desktop, in front of you. Now they only print a link, and you choose when to look. One case needs care: a claude.ai Artifact opens only in the Chrome profile logged in to the Claude account that made it.</p>
+  <div class="card">
+    <div class="flow">
+      <div class="box tl"><b>an agent prints a full link</b><small><code>file:///Users/jeanlescut/…</code>, <code>file:///Volumes/private/…</code>, <code>https://claude.ai/…</code> (the rule: CLAUDE.md, "Answering the user")</small></div><div class="arr">→</div>
+      <div class="box tl"><b>you click it in iTerm2</b><small>iTerm2 runs <code>open-link</code> (set by <code>install.sh</code>: <code>set_iterm2_clicks.py</code>)</small></div><div class="arr">→</div>
+      <div class="box tl"><b><code>open_link.py</code> decides</b><small>claude.ai link in a Claude session's terminal → that account's profile · other web link or page → your own profile · any other file → the app macOS picks</small></div>
+    </div>
+    <p class="note">How it knows the terminal's Claude account: when a session starts, the agent gateway's hook writes its account on the tmux pane (<code>@claude_account</code>); <code>open-link</code> trusts it only while a claude process still runs there. Every click is a line in <code>state/clicks.log</code>. An agent cannot run <code>open-link</code>.</p>
+  </div>
+
+  <h2>6 · Considerations we settled</h2>
+  <div class="card">
+    <table>
+      <tr><th>Question</th><th>Answer</th><th>Why</th></tr>
+      <tr><td>Why two ways into Chrome (agent, script), not one?</td><td>one per kind of caller</td><td>Only Claude in Chrome: scripts cannot call it and the NAS has no screen (in November, about 925 of the Mac's 1,088 tabs were headless, mostly from code). Only a program-controlled Chrome for agents too: a rebuild of what Claude in Chrome gives for free, new logins everywhere, agent-vault's typing ported.</td></tr>
+      <tr><td>Can an agent switch headless ↔ visible?</td><td>no, and it does not choose</td><td>an agent browsing is always visible (it may need you); code is always headless. A tab cannot move between the two Chromes.</td></tr>
+      <tr><td>Focus</td><td>never taken by an agent</td><td>when it needs you, it marks the tab "waiting for Jean" (red bar, "!") and says so in the terminal</td></tr>
+      <tr><td>Where does agent-firewall act?</td><td>one layer earlier, on the agent's tool calls</td><td>see below: it sees an agent's commands and their printed output, not what code does inside Chrome; a scheduled job has no agent, so no firewall</td></tr>
+      <tr><td>agent-vault for code?</td><td>no</td><td>no agent is in the loop to protect; its typing works only in a visible Claude in Chrome tab</td></tr>
+      <tr><td>Your own Chrome profile</td><td>never an agent's</td><td>it holds your password vault: the hook refuses it; only your own click opens it</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <pre>interactive:  Agent ──(tool call: Bash "python script.py")──► agent-firewall's hooks ──► script ──► script gateway ──► headless Chrome
+              Agent ──(tool call: Claude in Chrome)───────────► agent-firewall's hooks ──► agent gateway's hook ──► Claude in Chrome ──► your Chrome
+scheduled:    job-runner ──► script ──► script gateway ──► headless Chrome            (no agent, no firewall)</pre>
+  </div>
+
+  <h2>7 · Profiles</h2>
+  <div class="card">
+    <table>
+      <tr><th>Who</th><th>Chrome profile</th><th>Used by</th></tr>
+      <tr><td>Claude account a</td><td><code>Claude - Account A</code></td><td>its sessions' tabs (agent gateway); claude.ai links clicked in its terminals. LinkedIn, Facebook, WhatsApp Web, Oxylabs, Bybit are logged in here</td></tr>
+      <tr><td>Claude account b</td><td><code>Claude - Account B</code></td><td>the same, for account b</td></tr>
+      <tr><td>You</td><td>your own profile (Default)</td><td>your clicks on any other link; never an agent</td></tr>
+      <tr><td>Code</td><td>its own data folder (no Chrome profile)</td><td>the script gateway</td></tr>
+    </table>
+    <p class="note"><code>agent-chrome profile</code> prints the session's profile; the list lives in <code>shared/chrome_kit.py</code>.</p>
+  </div>
+
+  <h2>8 · Nothing left open</h2>
+  <div class="card"><pre>LaunchAgent com.jeanlescut.chrome-gateways (every hour, works once a day)
+  └─► ~/opt/chrome-gateways/entrypoint.sh  (shared/clean_job.sh)
+        └─► agent-chrome clean --dry-run --no-chrome     from the record alone, never asks Chrome (no macOS prompt)
+              ├─ nothing to close  → its Todoist task completed
+              └─ something to close → one task for you: "chrome-gateways: Review what clean would close, then run it"
+you, in a terminal: agent-chrome clean    closes tabs of ended sessions, drops what Chrome no longer has</pre></div>
+
+  <h2>9 · Folder map</h2>
+  <div class="card"><pre>chrome-gateways/                       → deployed to ~/opt/chrome-gateways/ by install.sh (same folders, no tests)
+├── README.html · AGENTS.md · REQUIREMENTS.md · DESIGN.md
+├── install.sh · uninstall.sh
+├── agent-gateway/                     an agent browsing (Mac)
+│   ├── hook.py                        every Claude in Chrome call; marks the tmux pane's account
+│   ├── agent_chrome.py                the command agent-chrome (authorize-tab, profile, needs human, status, clean…)
+│   ├── native_host.py · extension/    "Agent tab notes": bar, badge, side panel, place.js
+│   ├── desktops.py                    macOS desktops and windows
+│   ├── merge_claude_settings.py       the hook in each Claude account's settings.json
+│   ├── skills/chrome/SKILL.md         what agents read
+│   ├── doc/extension-shots/
+│   └── tests/
+├── script-gateway/                    code opening pages (Mac and NAS)
+│   ├── launch_headless.py
+│   └── tests/
+├── terminal-links/                    you clicking (Mac)
+│   ├── open_link.py                   the command open-link
+│   ├── set_iterm2_clicks.py           iTerm2's clicks → open-link
+│   └── tests/
+└── shared/
+    ├── chrome_kit.py                  the record, the profiles
+    ├── clean_job.sh                   the daily check
+    └── tests/test_install.sh</pre></div>
+
+  <h2>10 · Where we are</h2>
+  <div class="card">
+    <table>
+      <tr><th>Item</th><th>Status</th></tr>
+      <tr><td>Three gateways, the rename from agent-chrome</td><td><span class="st live">done 2026-11-24</span></td></tr>
+      <tr><td>One window per account and desktop for agent tabs (today: per project)</td><td><span class="st planned">next</span></td></tr>
+      <tr><td>The old paths under <code>~/opt/agent-chrome</code></td><td><span class="st live">gone 2026-11-24, on both machines</span></td></tr>
+      <tr><td>A login window for the script gateway's option 2 (<code>--login</code>)</td><td><span class="st planned">proposed</span></td></tr>
+    </table>
+    <p class="note">Steps and reasons: <a href="DESIGN.md"><code>DESIGN.md</code></a>. What you asked for: <a href="REQUIREMENTS.md"><code>REQUIREMENTS.md</code></a>.</p>
+  </div>
+
+  <h2>11 · Install and test</h2>
+  <div class="card">
+    <table>
+      <tr><th>What</th><th>Command</th></tr>
+      <tr><td>install (Mac; NAS: the script gateway, by <code>dev-install chrome-gateways</code>)</td><td><code>bash ~/dev/agents/chrome-gateways/install.sh</code></td></tr>
+      <tr><td>the extension, once per agent profile</td><td><code>chrome://extensions</code> → Developer mode → Load unpacked → <code>~/opt/chrome-gateways/agent-gateway/extension</code>; after a change: its reload button</td></tr>
+      <tr><td>fast tests</td><td><code>python3 -I agent-gateway/tests/test_agent_gateway.py</code> · <code>test_desktops.py</code> · <code>test_merge.py</code> · <code>node agent-gateway/tests/test_place.js</code> · <code>python3 -I script-gateway/tests/test_launcher.py</code> · <code>python3 -I terminal-links/tests/test_open_link.py</code> · <code>bash shared/tests/test_install.sh</code></td></tr>
+      <tr><td>the extension, headless</td><td><code>&lt;python with playwright&gt; agent-gateway/tests/test_extension.py &lt;Chrome for Testing&gt; &lt;scratch dir&gt;</code></td></tr>
+      <tr><td>live, with a Claude session</td><td><code>bash agent-gateway/tests/live/test_live.sh &lt;scratch folder&gt;</code></td></tr>
+    </table>
+  </div>
+
+  <h2>12 · Who else uses it</h2>
+  <div class="card">
+    <table>
+      <tr><th>Who</th><th>What</th></tr>
+      <tr><td>agent-vault (<code>vault-type</code>), agent-firewall's hook and sandbox</td><td>the record's <code>open.json</code>: which session owns a tab</td></tr>
+      <tr><td>scripts of jobs, marketplace-seller, cutaway, websites, robotics-radar, healthcare, smart-home</td><td>the script gateway</td></tr>
+      <tr><td>my-setup</td><td>the Chrome profiles per Claude account; CLAUDE.md's rule on links</td></tr>
+    </table>
+  </div>
+
+  <footer>Rules for agents: <a href="AGENTS.md">AGENTS.md</a> and <a href="agent-gateway/skills/chrome/SKILL.md">agent-gateway/skills/chrome/SKILL.md</a> · What you get: <a href="REQUIREMENTS.md">REQUIREMENTS.md</a> · How it is built: <a href="DESIGN.md">DESIGN.md</a> · History: <code>git log --follow</code> (agent-chrome, layer-chrome, agent-interfaces)</footer>
+</main>
+</body>
+</html>
